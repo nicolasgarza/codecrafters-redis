@@ -75,6 +75,7 @@ impl Redis {
     fn run_get(&mut self, key: &str) -> String {
         match self.data.get(key) {
             Some(value) => {
+                println!("{:?}", value.1);
                 match value.1 {
                     Some(expire) => {
                         if expire > SystemTime::now() {
