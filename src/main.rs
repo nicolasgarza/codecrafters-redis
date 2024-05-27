@@ -1,8 +1,8 @@
 // Uncomment this block to pass the first stage
-use std::{collections::HashMap, io::{Read, Write}, net::{TcpListener, TcpStream}, thread};
+use std::{collections::HashMap, io::{Read, Write}, net::{TcpListener, TcpStream}, thread, time::SystemTime};
 
 struct Redis {
-    data: HashMap<String, String>,
+    data: HashMap<String, (String, Option<SystemTime>)>,
 }
 
 impl Redis {
@@ -37,7 +37,13 @@ impl Redis {
                 make_bulk_string(words[words.len() - 1].as_str())
             },
             "SET" => {
-                self.run_set(words[1].as_str(), words[2].as_str())
+                if words.len() == 3 {
+                    self.run_set(words[1].as_str(), words[2].as_str(), None)
+                } else if words.len() == 5 {
+                    self.run_set(words[1].as_str(), words[2].as_str(), Some(words[4].as_str()))
+                } else {
+                    make_simple_string("-1")
+                }
             },
             "GET" => {
                 self.run_get(words[1].as_str())
@@ -51,15 +57,37 @@ impl Redis {
         }
     }
 
-    fn run_set(&mut self, key: &str, value: &str) -> String {
-        self.data.insert(key.to_string(), value.to_string());
-        make_simple_string("OK")
+    fn run_set(&mut self, key: &str, value: &str, expire: Option<&str>) -> String {
+        match expire {
+            Some(expire) => {
+                let expire = expire.parse::<u64>().unwrap();
+                let expire = SystemTime::now().checked_add(std::time::Duration::from_secs(expire)).unwrap();
+                self.data.insert(key.to_string(), (value.to_string(), Some(expire)));
+                make_simple_string("OK")
+            },
+            None => {
+                self.data.insert(key.to_string(), (value.to_string(), None));
+                make_simple_string("OK")
+            }
+        }
     }
 
-    fn run_get(&self, key: &str) -> String {
+    fn run_get(&mut self, key: &str) -> String {
         match self.data.get(key) {
             Some(value) => {
-                make_bulk_string(value)
+                match value.1 {
+                    Some(expire) => {
+                        if expire > SystemTime::now() {
+                            make_bulk_string(value.0.as_str())
+                        } else {
+                            self.data.remove(key);
+                            make_simple_string("-1")
+                        }
+                    },
+                    None => {
+                        make_bulk_string(value.0.as_str())
+                    }
+                }
             },
             None => {
                 make_simple_string("ERROR")
