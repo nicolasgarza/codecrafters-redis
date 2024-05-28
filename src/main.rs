@@ -1,20 +1,25 @@
 // Uncomment this block to pass the first stage
 use std::{collections::HashMap, env, io::{Read, Write}, net::{TcpListener, TcpStream}, thread, time::SystemTime};
 
+#[allow(dead_code)]
 struct Redis {
     data: HashMap<String, (String, Option<SystemTime>)>,
     is_master: bool,
     master_address: Option<String>,
     slaves: Vec<TcpStream>,
+    master_replid: Option<String>,
+    master_repl_offset: Option<u64>,
 }
 
 impl Redis {
-    fn new(is_master: bool, master_address: Option<String>) -> Redis {
+    fn new(is_master: bool, master_address: Option<String>, master_replid: Option<String>, master_repl_offset: Option<u64>) -> Redis {
         Redis {
             data: HashMap::new(),
             is_master,
             master_address,
             slaves: Vec::new(),
+            master_replid,
+            master_repl_offset,
         }
     }
 
@@ -49,7 +54,7 @@ impl Redis {
     }
 
     fn handle_echo(&self, words: &[String]) -> String {
-        make_bulk_string(words[words.len() - 1].as_str())
+        make_bulk_string(vec![words[words.len() - 1].as_str()])
     }
 
     fn handle_set(&mut self, words: &[String]) -> String {
@@ -71,14 +76,25 @@ impl Redis {
     }
 
     fn handle_info(&self) -> String {
-        let role = if self.is_master {
-            "master"
-        } else {
-            "slave"
-        };
-        let info = format!("role:{}", role);
-        make_bulk_string(&info)
+        let role = if self.is_master { "role:master" } else { "role:slave" };
+        let mut info: Vec<String> = vec![role.to_string()];
+
+        if self.is_master {
+            let master_replid = format!("master_replid:{}", self.master_replid.as_ref().unwrap());
+            let master_repl_offset = format!("master_repl_offset:{}", self.master_repl_offset.unwrap());
+
+            info.push(master_replid);
+            info.push(master_repl_offset);
+        }
+
+        let info_refs: Vec<&str> = info.iter().map(|s| s.as_str()).collect();
+        let res = make_bulk_string(info_refs);
+        let print_res = res.replace("\r\n", "\\r\\n");
+        // print out raw res:
+        println!("{}", print_res);
+        res
     }
+
 
     fn run_set(&mut self, key: &str, value: &str, expire: Option<&str>) -> String {
         let expiry_time = match expire {
@@ -99,9 +115,9 @@ impl Redis {
                 self.data.remove(key);
                 return make_null_bulk_string();
             }
-            make_bulk_string(value)
+            make_bulk_string(vec![value])
         } else if let Some((value, None)) = self.data.get(key) {
-            make_bulk_string(value)
+            make_bulk_string(vec![value])
         } else {
             make_null_bulk_string()
         }
@@ -110,9 +126,16 @@ impl Redis {
 
 // utility functions
 
-fn make_bulk_string(s: &str) -> String {
-    format!("${}\r\n{}\r\n", s.len(), s)
+fn make_bulk_string(words: Vec<&str>) -> String {
+    let total_length: usize = words.iter().map(|s| s.len() + 2).sum(); 
+    let mut res = String::new();
+    res.push_str(&format!("${}\r\n", total_length));
+    for word in words {
+        res.push_str(&format!("{}\r\n", word));
+    }
+    res
 }
+
 
 fn make_simple_string(s: &str) -> String {
     format!("+{}\r\n", s)
@@ -139,6 +162,9 @@ fn main() {
     let mut port = String::from("6379");
     let mut is_master = true;
     let mut master_address: Option<String> = None;
+    let mut master_replid: Option<String> = None;
+    let mut master_repl_offset: Option<u64> = None;
+
     if args.len() > 1 {
         for i in 0..args.len() {
             if args[i] == "--port" && i + 1 < args.len() {
@@ -152,6 +178,11 @@ fn main() {
         }
     }
 
+    if is_master {
+        master_replid = Some("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
+        master_repl_offset = Some(0);
+    }
+
     let address = format!("127.0.0.1:{}", port);
 
     let listener = TcpListener::bind(&address).unwrap();
@@ -160,10 +191,14 @@ fn main() {
             Ok(stream) => {
                 let is_master = is_master;
                 let master_address = master_address.clone();
+                let master_replid = master_replid.clone();
+                let master_repl_offset = master_repl_offset.clone();
                 thread::spawn(move || {
                     let mut redis = Redis::new(
                         is_master,
                         master_address,
+                        master_replid,
+                        master_repl_offset,
                     );
                     redis.handle_client(stream);
                 });
