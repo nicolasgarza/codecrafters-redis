@@ -3,12 +3,18 @@ use std::{collections::HashMap, env, io::{Read, Write}, net::{TcpListener, TcpSt
 
 struct Redis {
     data: HashMap<String, (String, Option<SystemTime>)>,
+    is_master: bool,
+    master_address: Option<String>,
+    slaves: Vec<TcpStream>,
 }
 
 impl Redis {
-    fn new() -> Redis {
+    fn new(is_master: bool, master_address: Option<String>) -> Redis {
         Redis {
             data: HashMap::new(),
+            is_master,
+            master_address,
+            slaves: Vec::new(),
         }
     }
 
@@ -65,7 +71,11 @@ impl Redis {
     }
 
     fn handle_info(&self) -> String {
-        let role = "master";
+        let role = if self.is_master {
+            "master"
+        } else {
+            "slave"
+        };
         let info = format!("role:{}", role);
         make_bulk_string(&info)
     }
@@ -127,10 +137,18 @@ fn get_words(s: String) -> Vec<String> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut port = String::from("6379");
+    let mut is_master = true;
+    let mut master_address: Option<String> = None;
+    println!("{:?}", args);
     if args.len() > 1 {
         for i in 0..args.len() {
             if args[i] == "--port" && i + 1 < args.len() {
                 port = args[i + 1].clone();
+            } else if args[i] == "--replicaof" && i + 1 < args.len() {
+                is_master = false;
+                let parts: Vec<&str> = args[i + 1].split_whitespace().collect();
+                let port = parts[1].trim_end_matches('"').to_string();
+                master_address = Some(port);
             }
         }
     }
@@ -141,8 +159,13 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(|| {
-                    let mut redis = Redis::new();
+                let is_master = is_master;
+                let master_address = master_address.clone();
+                thread::spawn(move || {
+                    let mut redis = Redis::new(
+                        is_master,
+                        master_address,
+                    );
                     redis.handle_client(stream);
                 });
             }
