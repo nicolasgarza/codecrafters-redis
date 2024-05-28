@@ -89,9 +89,7 @@ impl Redis {
 
         let info_refs: Vec<&str> = info.iter().map(|s| s.as_str()).collect();
         let res = make_bulk_string(info_refs);
-        let print_res = res.replace("\r\n", "\\r\\n");
-        // print out raw res:
-        println!("{}", print_res);
+    
         res
     }
 
@@ -127,13 +125,11 @@ impl Redis {
 // utility functions
 
 fn make_bulk_string(words: Vec<&str>) -> String {
-    let total_length: usize = words.iter().map(|s| s.len() + 2).sum(); 
     let mut res = String::new();
-    res.push_str(&format!("${}\r\n", total_length));
     for word in words {
-        res.push_str(&format!("{}\r\n", word));
+        res.push_str(&format!("\r\n{}", word));
     }
-    res
+    format!("${}{}\r\n", res.len() - 2, res)
 }
 
 
