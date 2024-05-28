@@ -139,7 +139,6 @@ fn main() {
     let mut port = String::from("6379");
     let mut is_master = true;
     let mut master_address: Option<String> = None;
-    println!("{:?}", args);
     if args.len() > 1 {
         for i in 0..args.len() {
             if args[i] == "--port" && i + 1 < args.len() {
