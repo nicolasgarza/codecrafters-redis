@@ -1,5 +1,5 @@
 // Uncomment this block to pass the first stage
-use std::{collections::HashMap, io::{Read, Write}, net::{TcpListener, TcpStream}, thread, time::SystemTime};
+use std::{collections::HashMap, env, io::{Read, Write}, net::{TcpListener, TcpStream}, thread, time::SystemTime};
 
 struct Redis {
     data: HashMap<String, (String, Option<SystemTime>)>,
@@ -118,7 +118,19 @@ fn get_words(s: String) -> Vec<String> {
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let args: Vec<String> = env::args().collect();
+    let mut port = String::from("6379");
+    if args.len() > 1 {
+        for i in 0..args.len() {
+            if args[i] == "--port" && i + 1 < args.len() {
+                port = args[i + 1].clone();
+            }
+        }
+    }
+
+    let address = format!("127.0.0.1:{}", port);
+
+    let listener = TcpListener::bind(&address).unwrap();
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
