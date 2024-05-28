@@ -20,7 +20,7 @@ impl Redis {
                     if n == 0 { break; }
                     let rec = String::from_utf8_lossy(&buffer[..n]);
                     let res = self.handle_input(rec.to_string());
-                    stream.write(res.as_bytes()).unwrap();
+                    stream.write_all(res.as_bytes()).unwrap();
                 }
                 Err(e) => {
                     println!("error: {}", e);
@@ -36,6 +36,7 @@ impl Redis {
             "ECHO" => self.handle_echo(&words),
             "SET" => self.handle_set(&words),
             "GET" => self.handle_get(&words),
+            "INFO" => self.handle_info(),
             "PING" => make_simple_string("PONG"),
             _ => make_null_bulk_string(),
         }
@@ -61,6 +62,12 @@ impl Redis {
         } else {
             make_null_bulk_string()
         }
+    }
+
+    fn handle_info(&self) -> String {
+        let role = "master";
+        let info = format!("role:{}", role);
+        make_bulk_string(&info)
     }
 
     fn run_set(&mut self, key: &str, value: &str, expire: Option<&str>) -> String {
