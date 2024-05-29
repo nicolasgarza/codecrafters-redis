@@ -6,17 +6,19 @@ struct Redis {
     data: HashMap<String, (String, Option<SystemTime>)>,
     is_master: bool,
     master_address: Option<String>,
+    my_port: String,
     slaves: Vec<TcpStream>,
     master_replid: Option<String>,
     master_repl_offset: Option<u64>,
 }
 
 impl Redis {
-    fn new(is_master: bool, master_address: Option<String>, master_replid: Option<String>, master_repl_offset: Option<u64>) -> Redis {
+    fn new(is_master: bool, master_address: Option<String>, my_port: String, master_replid: Option<String>, master_repl_offset: Option<u64>) -> Redis {
         Redis {
             data: HashMap::new(),
             is_master,
             master_address,
+            my_port,
             slaves: Vec::new(),
             master_replid,
             master_repl_offset,
@@ -48,6 +50,7 @@ impl Redis {
             "SET" => self.handle_set(&words),
             "GET" => self.handle_get(&words),
             "INFO" => self.handle_info(),
+            "REPLCONF" => make_simple_string("OK"),
             "PING" => make_simple_string("PONG"),
             _ => make_null_bulk_string(),
         }
@@ -125,6 +128,44 @@ impl Redis {
         let mut stream = TcpStream::connect(self.master_address.as_ref().unwrap()).unwrap();
         let ping = "*1\r\n$4\r\nPING\r\n";
         stream.write_all(ping.as_bytes()).unwrap();
+        
+        let mut buffer = [0; 1024];
+        match stream.read(&mut buffer) {
+            Ok(n) => {
+                let rec = String::from_utf8_lossy(&buffer[..n]);
+                if rec != "+PONG\r\n" {
+                    println!("Error: Master did not respond with PONG");
+                }
+                self.send_conf_to_master(stream);
+            }
+            Err(e) => {
+                println!("error: {}", e);
+                return;
+            }
+        }
+    }
+
+    fn send_conf_to_master(&self, mut stream: TcpStream) {
+        // Send the first REPLCONF command
+        let res1 = make_resp_array(vec!["REPLCONF", "listening-port", &self.my_port]);
+        stream.write_all(res1.as_bytes()).unwrap();
+        // Wait and read the response
+        let mut buffer = [0; 1024];
+        let n = stream.read(&mut buffer).unwrap();
+        let response1 = String::from_utf8_lossy(&buffer[..n]);
+        if response1 != "+OK\r\n" {
+            println!("Error: Master did not respond with OK after REPLCONF listening-port");
+        }
+
+        // Send the second REPLCONF command
+        let res2 = make_resp_array(vec!["REPLCONF", "capa", "psync2"]);
+        stream.write_all(res2.as_bytes()).unwrap();
+        // Wait and read the response
+        let n = stream.read(&mut buffer).unwrap();
+        let response2 = String::from_utf8_lossy(&buffer[..n]);
+        if response2 != "+OK\r\n" {
+            println!("Error: Master did not respond with OK after REPLCONF capa psync2");
+        }
     }
 }
 
@@ -145,6 +186,14 @@ fn make_simple_string(s: &str) -> String {
 
 fn make_null_bulk_string() -> String {
     "$-1\r\n".to_string()
+}
+
+fn make_resp_array(words: Vec<&str>) -> String {
+    let mut res = format!("*{}\r\n", words.len());
+    let items = words.clone();
+    let items = items.iter().map(|item| format!("${}\r\n{}\r\n", item.len(), item)).collect::<String>();
+    res.push_str(&items);
+    res
 }
 
 fn get_words(s: String) -> Vec<String> {
@@ -191,7 +240,7 @@ fn main() {
 
     if !is_master {
         if let Some(_master_addr) = &master_address {
-            let init_redis = Redis::new(is_master, master_address.clone(), master_replid.clone(), master_repl_offset.clone());
+            let init_redis = Redis::new(is_master, master_address.clone(), port.clone(), master_replid.clone(), master_repl_offset.clone());
             init_redis.ping_master();
         }
     }
@@ -202,11 +251,12 @@ fn main() {
             Ok(stream) => {
                 let local_is_master = is_master;
                 let local_master_address = master_address.clone();
+                let local_port = port.clone();
                 let local_master_replid = master_replid.clone();
                 let local_master_repl_offset = master_repl_offset.clone();
                 thread::spawn(move || {
                     println!("Handling client in new thread");
-                    let mut thread_redis = Redis::new(local_is_master, local_master_address, local_master_replid, local_master_repl_offset);
+                    let mut thread_redis = Redis::new(local_is_master, local_master_address, local_port, local_master_replid, local_master_repl_offset);
                     thread_redis.handle_client(stream);
                 });
             }
