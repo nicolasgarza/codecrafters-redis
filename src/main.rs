@@ -51,6 +51,7 @@ impl Redis {
             "GET" => self.handle_get(&words),
             "INFO" => self.handle_info(),
             "REPLCONF" => make_simple_string("OK"),
+            "PSYNC" => make_simple_string(format!("FULLRESYNC {} 0", self.master_replid.as_ref().unwrap()).as_str()),
             "PING" => make_simple_string("PONG"),
             _ => make_null_bulk_string(),
         }
@@ -166,6 +167,18 @@ impl Redis {
         if response2 != "+OK\r\n" {
             println!("Error: Master did not respond with OK after REPLCONF capa psync2");
         }
+
+        self.send_psync_to_master(stream);
+    }
+
+    fn send_psync_to_master(&self, mut stream: TcpStream) {
+        let res = make_resp_array(vec!["PSYNC", "?", "-1"]);
+        stream.write_all(res.as_bytes()).unwrap();
+
+        let mut buffer = [0; 1024];
+        let n  = stream.read(&mut buffer).unwrap();
+        let _ = String::from_utf8_lossy(&buffer[..n]);
+
     }
 }
 
@@ -255,7 +268,6 @@ fn main() {
                 let local_master_replid = master_replid.clone();
                 let local_master_repl_offset = master_repl_offset.clone();
                 thread::spawn(move || {
-                    println!("Handling client in new thread");
                     let mut thread_redis = Redis::new(local_is_master, local_master_address, local_port, local_master_replid, local_master_repl_offset);
                     thread_redis.handle_client(stream);
                 });
