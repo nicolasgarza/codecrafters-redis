@@ -1,3 +1,5 @@
+pub mod servers;
+
 pub fn make_bulk_string(words: Vec<&str>) -> String {
     let mut res = String::new();
     for word in words {
@@ -35,4 +37,3 @@ pub fn get_words(s: String) -> Vec<String> {
         .collect()
 }
 
-pub mod servers;

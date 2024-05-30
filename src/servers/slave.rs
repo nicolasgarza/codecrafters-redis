@@ -1,10 +1,9 @@
 use std::{io::{Read, Write}, net::TcpStream};
+use crate::{get_words, make_bulk_string, make_simple_string, make_null_bulk_string, make_resp_array};
 
-use crate::{make_bulk_string, make_simple_string, make_null_bulk_string, make_resp_array, get_words};
-
+#[allow(dead_code)]
 pub struct Slave {
-    stream: TcpStream,
-    address: String,
+    // stream: TcpStream,
     master_address: String,
     my_port: String,
     replication_id: String,
@@ -12,11 +11,10 @@ pub struct Slave {
 }
 
 impl Slave {
-    fn new(address: String, master_address: String, my_port: String) -> Slave {
-        let stream = TcpStream::connect(address.as_ref()).unwrap();
+    pub fn new(master_address: String, my_port: String) -> Slave {
+        // let stream = TcpStream::connect(&master_address).unwrap();
         Slave {
-            stream,
-            address,
+            // stream,
             master_address,
             my_port,
             replication_id: String::new(),
@@ -24,15 +22,14 @@ impl Slave {
         }
     }
 
-    fn handle_client(&mut self, mut stream: TcpStream) {
+    pub fn handle_client(&mut self, mut stream: TcpStream) {
         let mut buffer = [0; 1024];
         loop {
             match stream.read(&mut buffer) {
                 Ok(n) => {
                     if n == 0 { break; }
                     let rec = String::from_utf8_lossy(&buffer[..n]);
-                    let res = self.handle_input(rec.to_string());
-                    stream.write_all(res.as_bytes()).unwrap();
+                    self.handle_input(rec.to_string(), &mut stream);
                 }
                 Err(e) => {
                     println!("error: {}", e);
@@ -42,33 +39,32 @@ impl Slave {
         }
     }
 
-    fn handle_input(&mut self, input: String) -> String {
+    fn handle_input(&mut self, input: String, stream: &mut TcpStream){
         let words = get_words(input);
         match words[0].as_str() {
-            "ECHO" => self.handle_echo(&words),
-            "INFO" => self.handle_info(),
-            "PING" => make_simple_string("PONG"),
-            "FULLRESYNC" => self.handle_full_resync(&words),
-            _ => make_null_bulk_string(),
+            "ECHO" => self.handle_echo(stream, &words),
+            "PING" => stream.write_all(make_simple_string("PONG").as_bytes()).unwrap(),
+            "INFO" => self.handle_info(stream),
+            _ => stream.write_all(make_null_bulk_string().as_bytes()).unwrap(),
         }
     }
 
-    fn handle_echo(&self, words: &[String]) -> String {
-        make_bulk_string(vec![words[words.len() - 1].as_str()])
+    fn handle_echo(&self, stream: &mut TcpStream, words: &[String]) {
+        stream.write_all(make_bulk_string(vec![words[words.len() - 1].as_str()]).as_bytes()).unwrap();
     }
 
-    fn handle_info(&self) -> String {
+    fn handle_info(&self, stream: &mut TcpStream) {
         let role = "role:slave";
         let info: Vec<String> = vec![role.to_string()];
 
         let info_refs: Vec<&str> = info.iter().map(|s| s.as_str()).collect();
         let res = make_bulk_string(info_refs);
     
-        res
+        stream.write_all(res.as_bytes()).unwrap();
     }
 
-    fn ping_master(&self) {
-        let mut stream = TcpStream::connect(self.master_address.as_ref().unwrap()).unwrap();
+    pub fn ping_master(&self) {
+        let mut stream = TcpStream::connect(&self.master_address).unwrap();
         let ping = "*1\r\n$4\r\nPING\r\n";
         stream.write_all(ping.as_bytes()).unwrap();
         
@@ -97,7 +93,7 @@ impl Slave {
         let n = stream.read(&mut buffer).unwrap();
         let response1 = String::from_utf8_lossy(&buffer[..n]);
         if response1 != "+OK\r\n" {
-            println!("Error: Master did not respond with OK after REPLCONF listening-port");
+            println!("Error: Master did not respond with OK after REPLCONF listening-port, got: {}", response1);
         }
 
         // Send the second REPLCONF command
@@ -121,11 +117,17 @@ impl Slave {
         let n  = stream.read(&mut buffer).unwrap();
         let _ = String::from_utf8_lossy(&buffer[..n]);
 
+        // now wait for the rdb
+        let mut buffer = [0; 1024];
+        let n = stream.read(&mut buffer).unwrap();
+        let _ = String::from_utf8_lossy(&buffer[..n]);
+        // println!("slave got from master: {}", rec);
+
     }
 
-    fn handle_full_resync(&mut self, words: &[String]) -> String {
-        self.replication_id = words[1].clone();
-        self.replication_offset = words[2].parse().unwrap();
-        make_simple_string("OK")
-    }
+    // fn handle_full_resync(&mut self, words: &[String]) -> String {
+    //     self.replication_id = words[1].clone();
+    //     self.replication_offset = words[2].parse().unwrap();
+    //     make_simple_string("OK")
+    // }
 }
