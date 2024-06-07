@@ -1,7 +1,12 @@
-use std::{collections::HashMap, io::{Read, Write}, net::TcpStream, time::SystemTime};
-use crate::{get_words, make_bulk_string, make_simple_string, make_null_bulk_string};
 use crate::servers::slave::Slave;
+use crate::{get_words, make_bulk_string, make_null_bulk_string, make_simple_string};
 use base64::prelude::*;
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    net::TcpStream,
+    time::SystemTime,
+};
 
 #[allow(dead_code)]
 pub struct Redis {
@@ -13,7 +18,11 @@ pub struct Redis {
 }
 
 impl Redis {
-    pub fn new(my_port: String, master_replid: Option<String>, master_repl_offset: Option<u64>) -> Redis {
+    pub fn new(
+        my_port: String,
+        master_replid: Option<String>,
+        master_repl_offset: Option<u64>,
+    ) -> Redis {
         Redis {
             data: HashMap::new(),
             my_port,
@@ -28,7 +37,9 @@ impl Redis {
         loop {
             match stream.read(&mut buffer) {
                 Ok(n) => {
-                    if n == 0 { break; }
+                    if n == 0 {
+                        break;
+                    }
                     let rec = String::from_utf8_lossy(&buffer[..n]);
                     self.handle_input(rec.to_string(), &mut stream);
                 }
@@ -40,31 +51,46 @@ impl Redis {
         }
     }
 
-    fn handle_input(&mut self, input: String, stream: &mut TcpStream){
+    fn handle_input(&mut self, input: String, stream: &mut TcpStream) {
         let words = get_words(input);
         match words[0].as_str() {
             "ECHO" => self.handle_echo(stream, &words),
             "SET" => self.handle_set(stream, &words),
-            "GET" => self.handle_get(stream,&words),
+            "GET" => self.handle_get(stream, &words),
             "INFO" => self.handle_info(stream),
-            "REPLCONF" => stream.write_all(make_simple_string("OK").as_bytes()).unwrap(),
+            "REPLCONF" => stream
+                .write_all(make_simple_string("OK").as_bytes())
+                .unwrap(),
             "PSYNC" => self.handle_psync(stream),
-            "PING" => stream.write_all(make_simple_string("PONG").as_bytes()).unwrap(),
-            _ => stream.write_all(make_null_bulk_string().as_bytes()).unwrap(),
+            "PING" => stream
+                .write_all(make_simple_string("PONG").as_bytes())
+                .unwrap(),
+            _ => stream
+                .write_all(make_null_bulk_string().as_bytes())
+                .unwrap(),
         }
     }
 
     fn handle_echo(&self, stream: &mut TcpStream, words: &[String]) {
-        stream.write_all(make_bulk_string(vec![words[words.len() - 1].as_str()]).as_bytes()).unwrap();
+        stream
+            .write_all(make_bulk_string(vec![words[words.len() - 1].as_str()]).as_bytes())
+            .unwrap();
     }
 
     fn handle_set(&mut self, stream: &mut TcpStream, words: &[String]) {
         if words.len() == 3 {
             self.run_set(stream, words[1].as_str(), words[2].as_str(), None)
         } else if words.len() == 5 {
-            self.run_set(stream, words[1].as_str(), words[2].as_str(), Some(words[4].as_str()))
+            self.run_set(
+                stream,
+                words[1].as_str(),
+                words[2].as_str(),
+                Some(words[4].as_str()),
+            )
         } else {
-            stream.write_all(make_null_bulk_string().as_bytes()).unwrap();
+            stream
+                .write_all(make_null_bulk_string().as_bytes())
+                .unwrap();
         }
     }
 
@@ -72,7 +98,9 @@ impl Redis {
         if words.len() == 2 {
             self.run_get(stream, &words[1])
         } else {
-            stream.write_all(make_null_bulk_string().as_bytes()).unwrap();
+            stream
+                .write_all(make_null_bulk_string().as_bytes())
+                .unwrap();
         }
     }
 
@@ -86,10 +114,9 @@ impl Redis {
         info.push(master_repl_offset);
         let info_refs: Vec<&str> = info.iter().map(|s| s.as_str()).collect();
         let res = make_bulk_string(info_refs);
-    
+
         stream.write_all(res.as_bytes()).unwrap();
     }
-
 
     fn run_set(&mut self, stream: &mut TcpStream, key: &str, value: &str, expire: Option<&str>) {
         let expiry_time = match expire {
@@ -99,28 +126,41 @@ impl Redis {
             },
             None => None,
         };
-        
-        self.data.insert(key.to_string(), (value.to_string(), expiry_time));
-        stream.write_all(make_simple_string("OK").as_bytes()).unwrap();
+
+        self.data
+            .insert(key.to_string(), (value.to_string(), expiry_time));
+        stream
+            .write_all(make_simple_string("OK").as_bytes())
+            .unwrap();
     }
 
     fn run_get(&mut self, stream: &mut TcpStream, key: &str) {
         if let Some((value, Some(expire))) = self.data.get(key) {
             if *expire <= SystemTime::now() {
                 self.data.remove(key);
-                stream.write_all(make_null_bulk_string().as_bytes()).unwrap();
+                stream
+                    .write_all(make_null_bulk_string().as_bytes())
+                    .unwrap();
                 return;
             }
-            stream.write_all(make_bulk_string(vec![value]).as_bytes()).unwrap();
+            stream
+                .write_all(make_bulk_string(vec![value]).as_bytes())
+                .unwrap();
         } else if let Some((value, None)) = self.data.get(key) {
-            stream.write_all(make_bulk_string(vec![value]).as_bytes()).unwrap();
+            stream
+                .write_all(make_bulk_string(vec![value]).as_bytes())
+                .unwrap();
         } else {
-            stream.write_all(make_null_bulk_string().as_bytes()).unwrap();
+            stream
+                .write_all(make_null_bulk_string().as_bytes())
+                .unwrap();
         }
     }
 
     fn handle_psync(&mut self, stream: &mut TcpStream) {
-        let res = make_simple_string(format!("FULLRESYNC {} 0", self.master_replid.as_ref().unwrap()).as_str());
+        let res = make_simple_string(
+            format!("FULLRESYNC {} 0", self.master_replid.as_ref().unwrap()).as_str(),
+        );
         stream.write_all(res.as_bytes()).unwrap();
         self.send_rdb(stream);
     }
@@ -133,4 +173,6 @@ impl Redis {
         stream.write_all(&content).unwrap();
         println!("wrote rdb");
     }
+
+    // TODO: func to add slave to struct
 }

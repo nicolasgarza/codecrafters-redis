@@ -53,7 +53,7 @@ fn main() {
         if let Some(master_addr) = master_address.clone() {
             let local_port = port.clone();
             thread::spawn(move || {
-                let slave = Slave::new(master_addr, local_port.clone());
+                let slave = Slave::new(stream, master_addr, local_port.clone());
                 slave.ping_master(); // Initialize and maintain master connection here
             });
         }

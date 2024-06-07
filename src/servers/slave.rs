@@ -3,7 +3,7 @@ use crate::{get_words, make_bulk_string, make_simple_string, make_null_bulk_stri
 
 #[allow(dead_code)]
 pub struct Slave {
-    // stream: TcpStream,
+    stream: TcpStream,
     master_address: String,
     my_port: String,
     replication_id: String,
@@ -11,10 +11,9 @@ pub struct Slave {
 }
 
 impl Slave {
-    pub fn new(master_address: String, my_port: String) -> Slave {
-        // let stream = TcpStream::connect(&master_address).unwrap();
+    pub fn new(stream: TcpStream, master_address: String, my_port: String) -> Slave {
         Slave {
-            // stream,
+            stream,
             master_address,
             my_port,
             replication_id: String::new(),
